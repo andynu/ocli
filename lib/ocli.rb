@@ -14,37 +14,28 @@ require 'terminal-table'
 module Ocli
 
   ORACLE_KEYWORDS = %w[
-    access  else  modify  start
-    add exclusive noaudit select
-    all exists  nocompress  session
-    alter file  not set
-    and float notfound  share
-    any for nowait  size
-    arraylen  from  null  smallint
-    as  grant number  sqlbuf
-    asc group of  successful
-    audit having  offline synonym
-    between identified  on  sysdate
-    by  immediate online  table
-    char  in  option  then
-    check increment or  to
-    cluster index order trigger
-    column  initial pctfree uid
-    comment insert  prior union
-    compress  integer privileges  unique
-    connect intersect public  update
-    create  into  raw user
-    current is  rename  validate
-    date  level resource  values
-    decimal like  revoke  varchar
-    default lock  row varchar2
-    delete  long  rowid view
-    desc  maxextents  rowlabel  whenever
-    distinct  minus rownum  where
-    drop  mode  rows  with
+    access  else  modify  start add exclusive noaudit select
+    all exists  nocompress  session alter file  not set
+    and float notfound  share any for nowait  size
+    arraylen  from  null  smallint as  grant number  sqlbuf
+    asc group of  successful audit having  offline synonym
+    between identified  on  sysdate by  immediate online  table
+    char  in  option  then check increment or  to
+    cluster index order trigger column  initial pctfree uid
+    comment insert  prior union compress  integer privileges  unique
+    connect intersect public  update create  into  raw user
+    current is  rename  validate date  level resource  values
+    decimal like  revoke  varchar default lock  row varchar2
+    delete  long  rowid view desc  maxextents  rowlabel  whenever
+    distinct  minus rownum  where drop  mode  rows  with
   ]
 
   module Shell
+
+    def oracle_keywords
+      @oracle_keywords = ORACLE_KEYWORDS + ORACLE_KEYWORDS.map(&:upcase)
+      @oracle_keywords
+    end
     def before_loop
       super
     end
@@ -54,7 +45,7 @@ module Ocli
       expressions = [expression.split(/;/)].flatten.compact
       expressions.each do |expression|
         expression.strip!
-        case expression.downcase
+        case expression
         when ""
           # do nothing.
 
@@ -64,8 +55,14 @@ module Ocli
           args = expression.split /\s+/
           Shell.runtime.send(*args)
 
-        # Oracle SQL Commands
-        when /^#{ORACLE_KEYWORDS.join("|")}\s+/
+        when /^(#{oracle_keywords.join("|")})\s+.*\\g/
+          Shell.runtime.ascii_pivot_query(expression.gsub(/\\g$/,''))
+
+        when /^(#{ORACLE_KEYWORDS.join("|")})\s+.*\\G/
+          Shell.runtime.ascii_pivot_right_query(expression.gsub(/\\G$/,''))
+
+        # Oracle SQL Commands (ascii)
+        when /^(#{ORACLE_KEYWORDS.join("|")})\s+/
           Shell.runtime.ascii_query(expression)
 
         # Ripl (like irb)
@@ -209,10 +206,8 @@ module Ocli
 
     def to_txt(cursor)
       columns = []
-      hr = []
       cursor.column_metadata.each do |meta|
         columns << meta.name
-        hr << meta.name.gsub(/./,'-')
       end
 
       table = Terminal::Table.new do |t|
@@ -225,9 +220,41 @@ module Ocli
       puts table
     end
 
+    def to_pivot_txt(cursor, justify=:left)
+      columns = []
+      max_col_len = 10
+      cursor.column_metadata.each do |meta|
+        col = meta.name.downcase
+        columns << col
+        max_col_len = col.length if col.length > max_col_len
+      end
+
+      case justify
+      when :left
+        fmt = "  %s: %s"
+      else
+        fmt = "  %0#{max_col_len}s: %s"
+      end
+
+      puts "---"
+      while (row = cursor.fetch)
+        puts "-"
+        row.each_with_index do |val,i|
+          puts(fmt % [columns[i],val])
+        end
+      end
+    end
+
     def ascii_query(sql,params={})
-      p [:ascii_query,sql,params]
       to_txt(query(sql,params))
+    end
+
+    def ascii_pivot_query(sql,params={})
+      to_pivot_txt(query(sql,params))
+    end
+
+    def ascii_pivot_right_query(sql,params={}, justify=:right)
+      to_pivot_txt(query(sql,params), justify)
     end
 
     def show_tables
