@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+$:.push File.expand_path('../../lib',__FILE__)
+require 'ocli'
+
+
+if $0 == __FILE__
+  Ocli.init
+  Ripl.start
+end
