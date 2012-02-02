@@ -97,7 +97,10 @@ module Ocli
         "#{severity}: #{msg}\n"
       end
 
-      @config ||= YAML.load_file(File.join(ENV["HOME"] || "~", ".ocli.yml"))
+      @config = {}
+      yaml = File.join(ENV["HOME"] || "~", ".ocli.yml")
+      @config = YAML.load_file(yaml) || {} if File.exists?(yaml)
+
       @tns_names ||= {}
 
       @databases = @config.keys + @tns_names.keys
