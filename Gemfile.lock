@@ -2,6 +2,7 @@ GEM
   remote: http://rubygems.org/
   specs:
     bond (0.4.1)
+    highline (1.6.11)
     redgreen (1.2.2)
     ripl (0.6.1)
       bond (~> 0.4.0)
@@ -15,6 +16,7 @@ GEM
     ripl-rc (0.2.4)
       ripl (>= 0.4.1)
     ruby-oci8 (2.1.0)
+    terminal-table (1.4.4)
     watchr (0.7)
     wirb (0.4.1)
 
@@ -22,6 +24,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  highline
   redgreen
   ripl
   ripl-color_result
@@ -29,4 +32,5 @@ DEPENDENCIES
   ripl-multi_line
   ripl-rc
   ruby-oci8
+  terminal-table
   watchr

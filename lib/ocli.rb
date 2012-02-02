@@ -1,16 +1,15 @@
+
 require 'ripl'
 require 'ripl/color_result'
 require 'ripl/color_streams'
 require 'ripl/rc'
 
-require 'ripl/silence_ruby'
-require 'ripl/echo'
+require 'logger'
+require 'yaml'
 
 require 'oci8' # database adapter
-
-
-
-require 'ripl/multi_line'
+require 'highline/import'
+require 'terminal-table'
 
 class Ocli
 
@@ -45,30 +44,42 @@ class Ocli
     drop  mode  rows  with
   ]
 
-  module Shell 
+  module Shell
     def before_loop
       super
     end
 
     def loop_eval(expression)
-      case expression
+      ret = nil
+      expressions = [expression.split(/;/)].flatten.compact
+      expressions.each do |expression|
+        expression.strip!
+        p [:expression,expression]
+        case expression.downcase
+        when ""
+          # do nothing.
 
-      # State Commands
-      when /^(connect)/
-        args = expression.split /\s+/
-        Shell.runtime.send(*args)
-        
-      # Oracle Commands
-      when /^#{ORACLE_KEYWORDS.join("|")}/
-        Ripl.config[:rocket_mode] = false
-        puts "ORACLE COMMAND!"
-        puts expression
-        #puts Kernel.eval(expression, self)
+        # ::Runtime commands
+        when /^(connect|query|use|show_tables)/
+          Ripl.config[:rocket_mode] = false
+          args = expression.split /\s+/
+          Shell.runtime.send(*args)
 
-      else 
-        Ripl.config[:rocket_mode] = true
-        puts super
+        # Oracle SQL Commands
+        when /^#{ORACLE_KEYWORDS.join("|")}\s+/
+          Shell.runtime.ascii_query(expression)
+
+        # Ripl (like irb)
+        else
+          ret = super
+        end
       end
+      if ret.nil?
+        Ripl.config[:rocket_mode] = false
+      else
+        Ripl.config[:rocket_mode] = true
+      end
+      ret
     end
 
     def self.runtime
@@ -78,54 +89,147 @@ class Ocli
 
   class Runtime
 
+    def initialize
+      @log = Logger.new(STDERR)
+      @log.formatter = proc do |severity, datetime, progname, msg|
+        "#{severity}: #{msg}\n"
+      end
+    end
+
+    def log
+      @log
+    end
+
     # connection_string
     #   yaml_name [username] [password]
     #   tns_name username [password]
     #   //host:port/service_name username [password]
     #
+    #  yaml_name
+    #   references the keys from ~/.ocli.yml
+    #   ---
+    #   my_conn_name:
+    #    # dsn
+    #    dsn: //hostname:port/service_name
+    #    # or long hand
+    #    host: hostname
+    #    port: 1521
+    #    service_name: sn
+    #
+    #    username: username
+    #    password: password  # optional
     def connect(connection_string,*args)
-      tns_names = []
+      @config ||= YAML.load_file(File.join(ENV["HOME"] || "~", ".ocli.yml"))
+      @tns_names ||= {}
+
       case connection_string
-      when tns_names.include?(connection_string)
-        puts "establishing tns_name connection"
-      when /^:/
+      when *@config.keys
+        # YAML
+        config = @config[connection_string]
+        if config['dsn']
+          @dsn = config['dsn']
+        else
+          host = config['host'] || 'localhost'
+          port = config['port'] || 1521
+          service_name = config['service_name']
+          @dsn = "//%s:%s/%s" % [ host, port, service_name ]
+        end
 
-      # Oracle dsn [username] [password]
-      when /^\/\//
-        #match = connection_string.match(/^\/\/(\w+):(\d+)\/(\w+)/)
-        #cmd, host, port, service_name = match.to_a
-        #p [host, port, service_name]
+        @username = config['username'] unless config['username'].nil?
+        @password = config['password'] unless config['password'].nil?
 
+      # TNS: tns_name [username] [password]
+      when *@tns_names.keys
+        log.info "Establishing tns_name connection"
         @dsn = connection_string
-        p @dsn
-        p [@username, @password]
-        username, password = args
-        @username = username unless username.nil?
-        @password = password unless password.nil?
-        p [@username, @password]
 
-        @db = OCI8.new(@username,@password, @dsn)
+      when /^\/\//
+        # Oracle: //host:port/service_name [username] [password]
+        @dsn = connection_string
 
-        @result = {
-          db: @db,
-          time: Time.new
-        }
-        p @result
       else
-        $stderr.puts "unknown connection string '#{connection_string}'"
+        log.error "unknown connection string '#{connection_string}'"
       end
 
+      # args overrides
+      username, password = args
+      password = nil if @username != username # dependent
+      @username = username unless username.nil?
+      @password = password unless password.nil?
+
+      # ensure variables
+      @dsn ||= ask("dsn: ")
+      @username ||= ask("username: ")
+      @password ||= ask("password: ") {|q| q.echo = false } # shh
+
+      log.info "Connecting to #{@dsn} as #{@username}"
+      begin
+        @db = OCI8.new(@username,@password, @dsn)
+      rescue OCIError => e
+        log.error e
+        return
+      end
+
+      @result = {
+        db: @db,
+        time: Time.new
+      }
+      log.debug @result
       #@db = OCI8.new(username, password, dsn)
+    end
+    alias :use :connect
+
+    def query(sql, params={})
+      log.debug [sql,params]
+      cursor = @db.parse(sql)
+      sql_params = sql.scan(/:(\w+)/).flatten.uniq
+      params.each_pair do |name, value|
+        log.debug "bind :#{name} => #{value}"
+        cursor.bind_param(":#{name}", value)
+      end
+      cursor.exec()
+      cursor
+    end
+
+    def to_arr(cursor)
+      rows = []
+      while (row = cursor.fetch)
+        rows << row
+      end
+      rows
+    end
+
+    def to_txt(cursor)
+      columns = []
+      hr = []
+      cursor.column_metadata.each do |meta|
+        columns << meta.name
+        hr << meta.name.gsub(/./,'-')
+      end
+
+      table = Terminal::Table.new do |t|
+        t.add_row columns
+        t.add_separator
+        while (row = cursor.fetch)
+          t.add_row row
+        end
+      end
+      puts table
+    end
+
+    def ascii_query(sql,params={})
+      p [:ascii_query,sql,params]
+      to_txt(query(sql,params))
+    end
+
+    def show_tables
+      cursor = query("select table_name from user_tables")
+      puts to_arr(cursor).flatten.sort
     end
   end
 
 
   def self.init
-  end
-
-  def exec(*sql)
-    puts 'sql:'
-    puts sql.join(' ')
   end
 
   def echo(str="")
@@ -142,14 +246,6 @@ class Ocli
     end
   end
 
-  #def method_missing(m, *args, &block)
-  #  if ORACLE_KEYWORDS.include? m.downcase
-  #    puts [m,args].flatten.join(" ")
-  #  else
-  #    super
-  #  end
-  #end
-
   def to_s
     "ocli"
   end
@@ -157,4 +253,5 @@ class Ocli
 end
 
 Ripl::Shell.send :include, Ocli::Shell
+require 'ripl/multi_line'
 
