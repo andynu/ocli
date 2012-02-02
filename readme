@@ -3,3 +3,9 @@ wtf oracle!
 sqlplus sucks.
 the guis suck.
 help thy self.
+
+TODO:
+  * allow tnsnames.ora keys in use()
+  * commandline options
+  * csv output
+
