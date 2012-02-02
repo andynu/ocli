@@ -11,7 +11,7 @@ require 'oci8' # database adapter
 require 'highline/import'
 require 'terminal-table'
 
-class Ocli
+module Ocli
 
   ORACLE_KEYWORDS = %w[
     access  else  modify  start
@@ -54,13 +54,12 @@ class Ocli
       expressions = [expression.split(/;/)].flatten.compact
       expressions.each do |expression|
         expression.strip!
-        p [:expression,expression]
         case expression.downcase
         when ""
           # do nothing.
 
         # ::Runtime commands
-        when /^(connect|query|use|show_tables)/
+        when /^(connect|query|use|show_tables|show_databases|help|echo)/
           Ripl.config[:rocket_mode] = false
           args = expression.split /\s+/
           Shell.runtime.send(*args)
@@ -82,6 +81,10 @@ class Ocli
       ret
     end
 
+    def print_result(result)
+      super unless result.nil?
+    end
+
     def self.runtime
       @runtime ||= ::Ocli::Runtime.new
     end
@@ -91,9 +94,16 @@ class Ocli
 
     def initialize
       @log = Logger.new(STDERR)
+      @log.level = Logger::WARN
       @log.formatter = proc do |severity, datetime, progname, msg|
         "#{severity}: #{msg}\n"
       end
+
+      @config ||= YAML.load_file(File.join(ENV["HOME"] || "~", ".ocli.yml"))
+      @tns_names ||= {}
+
+      @databases = @config.keys + @tns_names.keys
+      @databases.sort!
     end
 
     def log
@@ -119,8 +129,6 @@ class Ocli
     #    username: username
     #    password: password  # optional
     def connect(connection_string,*args)
-      @config ||= YAML.load_file(File.join(ENV["HOME"] || "~", ".ocli.yml"))
-      @tns_names ||= {}
 
       case connection_string
       when *@config.keys
@@ -224,27 +232,49 @@ class Ocli
 
     def show_tables
       cursor = query("select table_name from user_tables")
-      puts to_arr(cursor).flatten.sort
+      @tables = to_arr(cursor).flatten.sort
+      puts @tables
+    end
+
+    def show_databases
+      puts @databases
+    end
+
+    def echo(str="")
+      puts "-- #{str}"
+    end
+
+    def help(usage_for=nil)
+      case usage_for
+      when 'readme'
+      when 'connect', 'use'
+        puts <<-HELP
+  use my_db [<username>] [<password>]
+        references keys to a hash in ~/ocli.yml
+  use //host:port/service_name [<username>] [<password>]
+        direct connection
+  # TODO
+  # use tns_name [<username>] [<password>]
+  #       references keys in tnsnames.ora
+        HELP
+      else
+        $stdout.puts <<-HELP
+  help # for a list of commands
+  help <command>
+  connect <connect_str> [<username>] [<password>]
+  show_tables # lists all the tables in this connection
+  show_databases # list all known databases
+  <sql> # execute oracle commands (prereq: use/connect)
+        HELP
+      end
     end
   end
 
 
   def self.init
+    Shell.runtime
   end
 
-  def echo(str="")
-    puts "-- #{str}"
-  end
-
-  def help(usage_for=nil)
-    case usage_for
-    when 'readme'
-    else
-      puts <<-HELP
-> help # for a list of commands
-      HELP
-    end
-  end
 
   def to_s
     "ocli"
@@ -252,6 +282,7 @@ class Ocli
 
 end
 
+Ripl::Commands.send :include, Ocli
 Ripl::Shell.send :include, Ocli::Shell
 require 'ripl/multi_line'
 
