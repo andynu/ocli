@@ -51,7 +51,7 @@ module Ocli
           # do nothing.
 
         # ::Runtime commands
-        when /^(connect|query|use|show|show_tables|show_databases|help|echo|desc)\s+/
+        when /^(connect\s+|query\s+|use\s+|show\s+|show_tables|show_databases|help|echo\s+|desc\s+)/
           Ripl.config[:rocket_mode] = false
           args = expression.split /\s+/
           Shell.runtime.send(*args)
@@ -309,7 +309,7 @@ module Ocli
   #       references keys in tnsnames.ora
         HELP
       else
-        $stdout.puts <<-HELP
+        puts <<-HELP
   help # for a list of commands
   help <command>
   connect <connect_str> [<username>] [<password>]
