@@ -213,26 +213,29 @@ module Ocli
     end
 
     def to_txt(cursor)
-      columns = []
-      cursor.column_metadata.each do |meta|
-        columns << meta.name
+      table = Terminal::Table.new
+
+      while (row = cursor.fetch)
+        txt_row = row.map{|e| 
+          case e
+          when BigDecimal # why is the default to_s in scientific notation?!
+            e.to_f
+          else
+            e
+          end
+        }
+        table.add_row txt_row
       end
 
-      table = Terminal::Table.new do |t|
-        t.add_row columns
-        t.add_separator
-        while (row = cursor.fetch)
-          t.add_row row.map{|e| 
-            case e
-            when BigDecimal # why is the default to_s in scientific notation?!
-              e.to_f
-            else
-              e
-            end
-            #e.class
-          }
+      columns = []
+      cursor.column_metadata.each_with_index do |meta,i|
+        columns << meta.name
+        if [:number, :binary_float, :binary_double].include?(meta.data_type)
+          table.align_column(i, :right) 
         end
       end
+      table.headings = columns
+
       puts table
     end
 
