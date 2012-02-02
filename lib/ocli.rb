@@ -28,6 +28,7 @@ module Ocli
     decimal like  revoke  varchar default lock  row varchar2
     delete  long  rowid view desc  maxextents  rowlabel  whenever
     distinct  minus rownum  where drop  mode  rows  with
+    describe
   ]
 
   module Shell
@@ -50,7 +51,7 @@ module Ocli
           # do nothing.
 
         # ::Runtime commands
-        when /^(connect|query|use|show_tables|show_databases|help|echo)/
+        when /^(connect|query|use|show|show_tables|show_databases|help|echo|desc)\s+/
           Ripl.config[:rocket_mode] = false
           args = expression.split /\s+/
           Shell.runtime.send(*args)
@@ -58,11 +59,11 @@ module Ocli
         when /^(#{oracle_keywords.join("|")})\s+.*\\g/
           Shell.runtime.ascii_pivot_query(expression.gsub(/\\g$/,''))
 
-        when /^(#{ORACLE_KEYWORDS.join("|")})\s+.*\\G/
+        when /^(#{oracle_keywords.join("|")})\s+.*\\G/
           Shell.runtime.ascii_pivot_right_query(expression.gsub(/\\G$/,''))
 
         # Oracle SQL Commands (ascii)
-        when /^(#{ORACLE_KEYWORDS.join("|")})\s+/
+        when /^(#{oracle_keywords.join("|")})\s+/
           Shell.runtime.ascii_query(expression)
 
         # Ripl (like irb)
@@ -175,9 +176,13 @@ module Ocli
         return
       end
 
+      cursor = query("select table_name from user_tables")
+      @tables = to_arr(cursor).flatten.sort.map(&:downcase)
+
       @result = {
         db: @db,
-        time: Time.new
+        time: Time.new,
+        tables: @tables.count,
       }
       log.debug @result
       #@db = OCI8.new(username, password, dsn)
@@ -258,13 +263,32 @@ module Ocli
     end
 
     def show_tables
-      cursor = query("select table_name from user_tables")
-      @tables = to_arr(cursor).flatten.sort
       puts @tables
     end
 
     def show_databases
       puts @databases
+    end
+
+    def show(obj,*args)
+      case obj
+      when 'tables'
+        show_tables
+      when 'databases'
+        show_databases
+      else
+        log.error "Unknown show object '#{obj}'"
+      end
+    end
+
+    def desc(obj,*args)
+      case obj
+      when *@tables
+        # | TABLE_NAME | COLUMN_NAME                    | DATA_TYPE | DATA_TYPE_MOD | DATA_TYPE_OWNER | DATA_LENGTH | DATA_PRECISION | DATA_SCALE | NULLABLE | COLUMN_ID | DEFAULT_LENGTH | DATA_DEFAULT | NUM_DISTINCT | LOW_VALUE                | HIGH_VALUE                 | DENSITY              | NUM_NULLS | NUM_BUCKETS | LAST_ANALYZED             | SAMPLE_SIZE | CHARACTER_SET_NAME | CHAR_COL_DECL_LENGTH | GLOBAL_STATS | USER_STATS | AVG_COL_LEN | CHAR_LENGTH | CHAR_USED | V80_FMT_IMAGE | DATA_UPGRADED | HISTOGRAM   
+        ascii_query("select column_name, data_type, nullable from user_tab_columns where table_name=:table_name", table_name: obj.upcase)
+      else
+        ascii_query([obj,args].flatten.join(" "))
+      end
     end
 
     def echo(str="")
@@ -289,8 +313,9 @@ module Ocli
   help # for a list of commands
   help <command>
   connect <connect_str> [<username>] [<password>]
-  show_tables # lists all the tables in this connection
-  show_databases # list all known databases
+  show tables # lists all the tables in this connection
+  show databases # list all known databases
+  desc table_name # lists column details
   <sql> # execute oracle commands (prereq: use/connect)
         HELP
       end
