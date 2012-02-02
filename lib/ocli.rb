@@ -92,7 +92,7 @@ module Ocli
 
     def initialize
       @log = Logger.new(STDERR)
-      @log.level = Logger::WARN
+      @log.level = Logger::INFO
       @log.formatter = proc do |severity, datetime, progname, msg|
         "#{severity}: #{msg}\n"
       end
@@ -222,7 +222,15 @@ module Ocli
         t.add_row columns
         t.add_separator
         while (row = cursor.fetch)
-          t.add_row row
+          t.add_row row.map{|e| 
+            case e
+            when BigDecimal # why is the default to_s in scientific notation?!
+              e.to_f
+            else
+              e
+            end
+            #e.class
+          }
         end
       end
       puts table
