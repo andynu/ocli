@@ -6,6 +6,7 @@ require 'ripl/rc'
 
 require 'logger'
 require 'yaml'
+require 'bigdecimal'
 
 require 'oci8' # database adapter
 require 'highline/import'
@@ -51,7 +52,7 @@ module Ocli
           # do nothing.
 
         # ::Runtime commands
-        when /^(connect\s+|query\s+|use\s+|show\s+|show_tables|show_databases|help|echo\s+|desc\s+)/
+        when /^(commit|connect\s+|query\s+|use\s+|show\s+|show_tables|show_databases|help|echo\s+|desc\s+)/
           Ripl.config[:rocket_mode] = false
           args = expression.split /\s+/
           Shell.runtime.send(*args)
@@ -204,6 +205,10 @@ module Ocli
       cursor
     end
 
+    def commit
+      @db.commit
+    end
+
     def to_arr(cursor)
       rows = []
       while (row = cursor.fetch)
@@ -265,7 +270,14 @@ module Ocli
     end
 
     def ascii_query(sql,params={})
-      to_txt(query(sql,params))
+      result = query(sql,params)
+      case sql
+      when /^select/
+        to_txt(query(sql,params))
+      else
+        p result
+      end
+      nil
     end
 
     def ascii_pivot_query(sql,params={})
